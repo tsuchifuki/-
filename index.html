@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>バイト月収シミュレーター</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1d2330;--mut:#667085;--ac:#2563eb;--bd:#dfe3ea;--warn:#b45309;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12151c;--card:#1b2029;--tx:#e8ebf1;--mut:#9aa3b2;--ac:#6b9bff;--bd:#2c3340;--warn:#f59e0b}}
+:root[data-theme="dark"]{--bg:#12151c;--card:#1b2029;--tx:#e8ebf1;--mut:#9aa3b2;--ac:#6b9bff;--bd:#2c3340;--warn:#f59e0b}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.6 system-ui,"Hiragino Sans","Noto Sans JP","Yu Gothic",sans-serif}
+main{max-width:720px;margin:0 auto;padding:16px}
+h1{font-size:1.3rem;margin:.4rem 0 1rem}h2{font-size:1rem;margin:0 0 .6rem}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+label{display:flex;flex-direction:column;font-size:.8rem;color:var(--mut);gap:3px}
+input{font:inherit;color:var(--tx);background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:7px;min-width:0}
+button{font:inherit;border:0;border-radius:8px;padding:9px 16px;background:var(--ac);color:#fff;cursor:pointer;margin-top:10px}
+button.sub{background:transparent;color:var(--mut);border:1px solid var(--bd);padding:3px 9px;margin:0}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--bd);font-size:.9rem}
+.big{font-size:1.5rem;font-weight:700}.mut{color:var(--mut);font-size:.85rem}.warn{color:var(--warn);font-size:.85rem}
+.scroll{overflow-x:auto}
+</style>
+</head>
+<body>
+<main>
+<h1>バイト月収シミュレーター</h1>
+
+<div class="card"><h2>設定</h2>
+<div class="grid">
+<label>基本時給(円)<input id="wage" type="number" value="1100" min="0"></label>
+<label>交通費(1出勤あたり・円)<input id="tr" type="number" value="0" min="0"></label>
+<label>深夜割増(%)<input id="np" type="number" value="25" min="0"></label>
+<label>時間外割増(%)<input id="op" type="number" value="25" min="0"></label>
+<label>所得税の税率(%・仮)<input id="rate" type="number" value="0" min="0" step="0.1"></label>
+<label>社会保険料(月・円)<input id="si" type="number" value="0" min="0"></label>
+<label>年間ライン(円・任意)<input id="limit" type="number" value="" min="0" placeholder="自分で調べた額"></label>
+<label>今年の既稼ぎ(円)<input id="before" type="number" value="0" min="0"></label>
+</div></div>
+
+<div class="card"><h2>シフトを追加</h2>
+<div class="grid">
+<label>日付<input id="d" type="date"></label>
+<label>出勤<input id="st" type="time" value="17:00"></label>
+<label>退勤<input id="en" type="time" value="22:00"></label>
+<label>休憩(分)<input id="br" type="number" value="0" min="0"></label>
+<label>この日の時給(任意)<input id="ow" type="number" min="0" placeholder="空欄=基本時給"></label>
+</div>
+<button id="add">追加</button>
+<div id="msg" class="warn"></div>
+<div id="list"></div></div>
+
+<div class="card"><h2>結果</h2><div id="res" class="scroll"><span class="mut">シフトを追加すると表示されます</span></div></div>
+
+<p class="mut">概算です。割増・端数処理・休憩の扱いは職場で異なり、所得税は税率を入れた簡易計算です(国税庁の税額表とは一致しない場合があります)。入力データはこのブラウザ内だけで処理され、どこにも送信されません。ページを閉じると消えます。</p>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let shifts=[];
+const yen=n=>Math.floor(n).toLocaleString('ja-JP')+'円';
+const tm=s=>{const[a,b]=s.split(':').map(Number);return a*60+b};
+const num=id=>Number($(id).value)||0;
+
+function calc(){
+  const wage=num('wage'),tr=num('tr'),np=num('np'),op=num('op'),rate=num('rate')/100,si=num('si');
+  const sorted=[...shifts].sort((a,b)=>(a.date+a.st)<(b.date+b.st)?-1:1);
+  const dayMin={},months={},rows=[];
+  for(const s of sorted){
+    const w=s.ow||wage;let a=tm(s.st),b=tm(s.en);if(b<=a)b+=1440;
+    const slots=[];for(let m=a;m<b;m++){const x=m%1440;slots.push(x>=1320||x<300)}
+    const keep=slots.map(()=>true);let rem=s.br;
+    for(const wn of [false,true])for(let i=0;i<slots.length&&rem>0;i++)if(keep[i]&&slots[i]===wn){keep[i]=false;rem--}
+    dayMin[s.date]=dayMin[s.date]||0;
+    let units=0,cnt=0,nt=0,ot=0;
+    slots.forEach((n,i)=>{if(!keep[i])return;const o=dayMin[s.date]>=480;dayMin[s.date]++;
+      units+=w*(100+(n?np:0)+(o?op:0));cnt++;if(n)nt++;if(o)ot++});
+    rows.push({s,w,units,cnt});
+    const k=s.date.slice(0,7),m=months[k]=months[k]||{n:0,units:0,cnt:0,nt:0,ot:0};
+    m.n++;m.units+=units;m.cnt+=cnt;m.nt+=nt;m.ot+=ot;
+  }
+  return{rows,months,tr,rate,si,wage,sorted};
+}
+
+function render(){
+  $('list').innerHTML=shifts.map((s,i)=>`<div class="row"><span>${s.date} ${s.st}-${s.en} 休憩${s.br}分${s.ow?' 時給'+s.ow:''}</span><button class="sub" data-i="${i}">削除</button></div>`).join('');
+  if(!shifts.length){$('res').innerHTML='<span class="mut">シフトを追加すると表示されます</span>';return}
+  const r=calc();let html='';const yearWage={};
+  for(const k of Object.keys(r.months).sort()){
+    const m=r.months[k],wg=Math.floor(m.units/6000),trs=m.n*r.tr;
+    const tax=Math.floor(Math.max(0,wg-r.si)*r.rate),pay=wg+trs,net=pay-r.si-tax;
+    yearWage[k.slice(0,4)]=(yearWage[k.slice(0,4)]||0)+wg;
+    html+=`<div class="big">${k} 手取り ${yen(net)}</div>
+    <div class="mut">出勤${m.n}回・実働${(m.cnt/60).toFixed(1)}h(深夜${(m.nt/60).toFixed(1)}h・時間外${(m.ot/60).toFixed(1)}h)</div>
+    <div class="row"><span>賃金</span><span>${yen(wg)}</span></div>
+    <div class="row"><span>交通費</span><span>${yen(trs)}</span></div>
+    <div class="row"><span>社会保険料</span><span>-${yen(r.si)}</span></div>
+    <div class="row"><span>所得税(仮)</span><span>-${yen(tax)}</span></div>
+    <div class="row"><b>手取り</b><b>${yen(net)}</b></div><br>`;
+  }
+  const lim=num('limit');
+  if(lim>0){
+    const y=r.sorted[r.sorted.length-1].date.slice(0,4),ytd=num('before')+(yearWage[y]||0),left=lim-ytd;
+    html+=`<div><b>${y}年の累計(賃金ベース)${yen(ytd)}</b></div>`+(left>=0
+      ?`<div>ラインまであと ${yen(left)}(基本時給換算で約${(left/(r.wage||1)).toFixed(1)}時間)</div>`
+      :`<div class="warn">ラインを ${yen(-left)} 超えています</div>`)
+      +`<div class="mut">ラインと比べる金額の基準(交通費・社会保険料の扱い)は制度ごとに違うので、公式情報で確認してください。</div>`;
+  }
+  $('res').innerHTML=html;
+}
+
+$('add').onclick=()=>{
+  const s={date:$('d').value,st:$('st').value,en:$('en').value,br:num('br'),ow:num('ow')};
+  if(!s.date||!s.st||!s.en){$('msg').textContent='日付・出勤・退勤を入力してください';return}
+  if(s.st===s.en){$('msg').textContent='出勤と退勤が同じ時刻です';return}
+  $('msg').textContent='';shifts.push(s);render();
+};
+$('list').onclick=e=>{const i=e.target.dataset.i;if(i!==undefined){shifts.splice(+i,1);render()}};
+document.querySelectorAll('.card:first-of-type input').forEach(el=>el.oninput=render);
+$('d').value=new Date().toISOString().slice(0,10);
+</script>
+</body>
+</html>
